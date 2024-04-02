@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -37,6 +38,8 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
 	_ "k8s.io/component-base/logs/json/register"
@@ -45,18 +48,32 @@ import (
 
 func main() {
 	var (
-		apiServerURL    string
-		kubeconfig      string
-		healthProbeAddr string
+		// apiServerURL    string
+		// kubeconfig      string
+		// healthProbeAddr string
+		apiServerURL    = pflag.StringP("apiServerURL", "", "", "Configuration file.")
+		kubeconfig      = pflag.StringP("kubeconfig", "", "", "Configuration file.")
+		healthProbeAddr = pflag.StringP("healthProbeAddr", "", "", "Configuration file.")
 	)
 
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
-	flag.StringVar(&apiServerURL, "apiserver", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
-	flag.StringVar(&healthProbeAddr, "health-probe-address", ":8081", "Specifies the TCP address for the health server to listen on.")
+	viper.AutomaticEnv() // 读取环境变量
+	// viper.SetEnvPrefix("VIPER")                                      // 设置环境变量前缀：VIPER_，如果是viper，将自动转变为大写。
+	// viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_")) // 将viper.Get(key) key字符串中'.'和'-'替换为'_'
+	viper.BindEnv(*kubeconfig, "KUBE_CONFIG")           // 绑定环境变量名到key
+	viper.BindEnv("apiServerURL", "APISERVER_URL")      // 绑定环境变量名到key
+	viper.BindEnv("healthProbeAddr", "HEAD_PROBE_ADDR") // 绑定环境变量名到key
+	pflag.Parse()
+
+	log.Println("*kubeconfig:", *kubeconfig)
+	os.Exit(0)
+
+	// flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
+	// flag.StringVar(&apiServerURL, "apiserver", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
+	// flag.StringVar(&healthProbeAddr, "health-probe-address", ":8081", "Specifies the TCP address for the health server to listen on.")
 
 	c := logsapi.NewLoggingConfiguration()
 	logsapi.AddGoFlags(c, flag.CommandLine)
-	flag.Parse()
+	// flag.Parse()
 	logs.InitLogs()
 	if err := logsapi.ValidateAndApply(c, nil); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -65,7 +82,8 @@ func main() {
 	ctx := signals.SetupSignalHandler()
 	logger := klog.FromContext(ctx)
 
-	cfg, err := clientcmd.BuildConfigFromFlags(apiServerURL, kubeconfig)
+	
+	cfg, err := clientcmd.BuildConfigFromFlags(*apiServerURL, *kubeconfig)
 	if err != nil {
 		logger.Error(err, "failed to build kubeconfig")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
@@ -111,7 +129,7 @@ func main() {
 	kubeInformerFactory.Start(ctx.Done())
 	sharedInformerFactory.Start(ctx.Done())
 
-	server := startHealthProbeServer(healthProbeAddr, logger)
+	server := startHealthProbeServer(*healthProbeAddr, logger)
 	nodeIpamController.Run(ctx)
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error(err, "failed to shut down health server")
